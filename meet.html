@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Meeting+</title>
+<style>
+  body { margin:0; font-family:sans-serif; background:#f0f0f0; }
+  header { padding:10px; background:#0a6; color:#fff; text-align:center; font-size:24px; }
+  #roomScreen { display:none; padding:10px; }
+  #participants { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap:10px; margin-bottom:10px; }
+  .participant { background:#000; color:#fff; border-radius:6px; height:120px; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+  video { width:100%; height:auto; border-radius:6px; }
+  #controls { display:flex; flex-wrap: wrap; justify-content:center; gap:10px; margin-bottom:10px; }
+  #subtitleBox { background:rgba(0,0,0,0.1); padding:5px; border-radius:5px; margin-bottom:10px; text-align:center; font-size:16px; min-height:20px; }
+  #chatContainer { display:flex; flex-direction:column; align-items:center; }
+  #chatBox { width:80%; height:150px; overflow-y:auto; border:1px solid gray; background:#fff; padding:5px; border-radius:5px; margin-bottom:5px; }
+  input, button { padding:5px; margin:2px; font-size:14px; border-radius:4px; border:1px solid #ccc; }
+  #roomMessage { color:red; margin-bottom:5px; }
+</style>
+</head>
+<body>
+
+<header>Meeting+</header>
+
+<div id="roomScreen">
+  <div id="participants">
+    <div class="participant" id="selfVideo">
+      <span>自分</span>
+      <video id="selfCam" autoplay muted></video>
+    </div>
+    <div class="participant">参加者1</div>
+    <div class="participant">参加者2</div>
+  </div>
+
+  <div id="controls">
+    <button onclick="toggleMic()">🎤 マイク</button>
+    <button onclick="toggleCam()">📷 カメラ</button>
+    <button onclick="shareScreen()">🖥 画面共有</button>
+    <button onclick="stopShare()">停止</button>
+    <button onclick="startCaption()">字幕オン</button>
+    <button onclick="stopCaption()">字幕オフ</button>
+    <button onclick="exitRoom()">退出</button>
+  </div>
+
+  <div id="subtitleBox">🎤 字幕はここに表示されます</div>
+
+  <div id="chatContainer">
+    <div id="chatBox"></div>
+    <input type="text" id="chatInput" placeholder="メッセージ入力">
+    <div>
+      <button onclick="sendMessage()">送信</button>
+      <button onclick="sendStamp('👍')">👍</button>
+      <button onclick="sendStamp('😂')">😂</button>
+      <button onclick="sendStamp('🎉')">🎉</button>
+    </div>
+  </div>
+</div>
+
+<div id="joinScreen" style="padding:10px; text-align:center;">
+  <input type="text" id="roomId" placeholder="ルームIDを入力">
+  <button onclick="enterRoom()">参加 / 作成</button>
+  <p id="roomMessage"></p>
+</div>
+
+<script>
+  // --- ルーム管理 ---
+  let rooms = {};
+  function enterRoom(){
+    const roomId = document.getElementById("roomId").value.trim();
+    if(!roomId){ document.getElementById("roomMessage").innerText="ルームIDが入力されていません"; return;}
+    if(!rooms[roomId]) rooms[roomId] = [];
+    document.getElementById("roomMessage").innerText="";
+    document.getElementById("joinScreen").style.display="none";
+    document.getElementById("roomScreen").style.display="block";
+    startCam(); // 入室時にカメラ開始
+  }
+
+  // --- マイク / カメラ ---
+  let micOn=true, camOn=true;
+  let localStream;
+  async function startCam(){
+    try{
+      localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+      document.getElementById("selfCam").srcObject = localStream;
+    }catch(err){
+      alert("カメラ/マイク取得失敗:"+err);
+    }
+  }
+  function toggleMic(){
+    if(!localStream) return;
+    micOn = !micOn;
+    localStream.getAudioTracks().forEach(track => track.enabled = micOn);
+    alert("マイク:"+ (micOn?"オン":"オフ"));
+  }
+  function toggleCam(){
+    if(!localStream) return;
+    camOn = !camOn;
+    localStream.getVideoTracks().forEach(track => track.enabled = camOn);
+    alert("カメラ:"+ (camOn?"オン":"オフ"));
+  }
+
+  // --- 字幕 ---
+  let recognition;
+  function startCaption(){
+    if(!('webkitSpeechRecognition' in window)){ alert("Chromeで実行してください"); return;}
+    recognition=new webkitSpeechRecognition();
+    recognition.lang="ja-JP";
+    recognition.continuous=true;
+    recognition.interimResults=true;
+    recognition.onresult=function(event){
+      let transcript="";
+      for(let i=event.resultIndex;i<event.results.length;i++) transcript+=event.results[i][0].transcript;
+      document.getElementById("subtitleBox").innerText=transcript;
+    };
+    recognition.start();
+  }
+  function stopCaption(){
+    if(recognition) recognition.stop();
+    document.getElementById("subtitleBox").innerText="🎤 字幕は停止しました";
+  }
+
+  // --- 画面共有 ---
+  let screenStream;
+  async function shareScreen(){
+    try{
+      screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+      const selfDiv=document.getElementById("selfVideo");
+      selfDiv.querySelector("span").innerText="共有中";
+      screenStream.getVideoTracks()[0].addEventListener("ended",stopShare);
+    }catch(err){ alert("画面共有失敗:"+err); }
+  }
+  function stopShare(){
+    if(screenStream){
+      screenStream.getTracks().forEach(t=>t.stop());
+      screenStream=null;
+    }
+    document.getElementById("selfVideo").querySelector("span").innerText="自分";
+  }
+
+  // --- チャット ---
+  function sendMessage(){
+    const msg=document.getElementById("chatInput").value.trim();
+    if(!msg) return;
+    document.getElementById("chatBox").innerHTML+="<div>📝 "+msg+"</div>";
+    document.getElementById("chatInput").value="";
+    document.getElementById("chatBox").scrollTop = document.getElementById("chatBox").scrollHeight;
+  }
+  function sendStamp(stamp){
+    document.getElementById("chatBox").innerHTML+="<div>"+stamp+"</div>";
+    document.getElementById("chatBox").scrollTop = document.getElementById("chatBox").scrollHeight;
+  }
+
+  // Enterキーで送信
+  document.getElementById("chatInput").addEventListener("keypress", function(e){
+    if(e.key === "Enter") sendMessage();
+  });
+
+  // --- 退出 ---
+  function exitRoom(){
+    document.getElementById("roomScreen").style.display="none";
+    document.getElementById("joinScreen").style.display="block";
+    document.getElementById("roomId").value="";
+    if(localStream){
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+    stopShare();
+    stopCaption();
+  }
+</script>
+
+</body>
+</html>
